@@ -1,0 +1,170 @@
+# Global Static IP Address
+apiVersion: compute.cnrm.cloud.google.com/v1beta1
+kind: ComputeGlobalAddress
+metadata:
+  name: pinky-promise-global-ip
+  namespace: production
+spec:
+  addressType: EXTERNAL
+  description: "Global static IP for Pinky Promise App"
+---
+# DNS Zone (if using Cloud DNS)
+apiVersion: dns.cnrm.cloud.google.com/v1beta1
+kind: DNSManagedZone
+metadata:
+  name: pinky-promise-zone
+  namespace: production
+spec:
+  dnsName: "pinky-promise.dev."
+  description: "DNS zone for Pinky Promise App"
+  visibility: public
+---
+# SSL Certificate for production domain
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: pinky-promise-ssl-prod
+  namespace: production
+spec:
+  domains:
+    - pinky-promise.dev
+    - www.pinky-promise.dev
+    - api.pinky-promise.dev
+---
+# Production Ingress with SSL
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pinky-promise-production-ingress
+  namespace: production
+  annotations:
+    kubernetes.io/ingress.global-static-ip-name: "pinky-promise-global-ip"
+    networking.gke.io/managed-certificates: "pinky-promise-ssl-prod"
+    kubernetes.io/ingress.allow-http: "false"  # Force HTTPS
+    kubernetes.io/ingress.class: "gce"
+    cloud.google.com/armor-config: '{"pinky-promise-security-policy": "pinky-promise-waf"}'
+    # Security headers
+    nginx.ingress.kubernetes.io/custom-http-errors: "404,503"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "X-Frame-Options: DENY";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
+      more_set_headers "Permissions-Policy: camera=(), microphone=(), geolocation=()";
+  labels:
+    app: pinky-promise
+spec:
+  rules:
+  # API subdomain
+  - host: api.pinky-promise.dev
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: pinky-promise-backend-service
+            port:
+              number: 80
+  # Main domain and www
+  - host: pinky-promise.dev
+    http:
+      paths:
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: pinky-promise-backend-service
+            port:
+              number: 80
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: pinky-promise-frontend-service
+            port:
+              number: 80
+  - host: www.pinky-promise.dev
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: pinky-promise-frontend-service
+            port:
+              number: 80
+---
+# Cloud Armor Security Policy
+apiVersion: compute.cnrm.cloud.google.com/v1beta1
+kind: ComputeSecurityPolicy
+metadata:
+  name: pinky-promise-waf
+  namespace: production
+spec:
+  description: "WAF policy for Pinky Promise App"
+  rules:
+  - action: "allow"
+    priority: 1000
+    match:
+      versionedExpr: "SRC_IPS_V1"
+      config:
+        srcIpRanges:
+        - "*"
+    description: "Default allow rule"
+  - action: "deny(403)"
+    priority: 2000
+    match:
+      expr:
+        expression: 'origin.region_code == "CN" || origin.region_code == "RU"'
+    description: "Block traffic from certain regions"
+  - action: "rate_based_ban"
+    priority: 3000
+    match:
+      versionedExpr: "SRC_IPS_V1"
+      config:
+        srcIpRanges:
+        - "*"
+    rateLimitOptions:
+      rateLimitThreshold:
+        count: 100
+        intervalSec: 60
+      banThreshold:
+        count: 1000
+        intervalSec: 600
+      banDurationSec: 3600
+    description: "Rate limiting and banning"
+---
+# HTTP to HTTPS Redirect
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pinky-promise-redirect
+  namespace: production
+  annotations:
+    kubernetes.io/ingress.class: "gce"
+    kubernetes.io/ingress.allow-http: "true"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+spec:
+  rules:
+  - host: pinky-promise.dev
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: pinky-promise-frontend-service
+            port:
+              number: 80
+  - host: www.pinky-promise.dev
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: pinky-promise-frontend-service
+            port:
+              number: 80
+

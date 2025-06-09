@@ -1,0 +1,649 @@
+# Database Backup CronJob
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: production
+spec:
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: postgres-backup
+            image: postgres:13
+            env:
+            - name: PGHOST
+              value: "postgresql-service.production.svc.cluster.local"
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: password
+            - name: PGDATABASE
+              value: "pinky_promise_db"
+            - name: BACKUP_NAME
+              value: "backup-$(date +%Y%m%d-%H%M%S)"
+            command:
+            - /bin/bash
+            - -c
+            - |
+              echo "Starting backup at $(date)"
+              pg_dump -h $PGHOST -U $PGUSER -d $PGDATABASE > /backup/$BACKUP_NAME.sql
+              gzip /backup/$BACKUP_NAME.sql
+              echo "Backup completed: $BACKUP_NAME.sql.gz"
+              # Upload to Google Cloud Storage
+              gsutil cp /backup/$BACKUP_NAME.sql.gz gs://pinky-promise-backups/database/
+              # Clean up local backup
+              rm /backup/$BACKUP_NAME.sql.gz
+              echo "Backup uploaded to GCS and local file cleaned up"
+            volumeMounts:
+            - name: backup-storage
+              mountPath: /backup
+            resources:
+              requests:
+                memory: "256Mi"
+                cpu: "250m"
+              limits:
+                memory: "512Mi"
+                cpu: "500m"
+          volumes:
+          - name: backup-storage
+            emptyDir: {}
+          restartPolicy: OnFailure
+      backoffLimit: 3
+  successfulJobsHistoryLimit: 5
+  failedJobsHistoryLimit: 3
+---
+# Application Data Backup
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: app-data-backup
+  namespace: production
+spec:
+  schedule: "0 3 * * 0"  # Weekly on Sunday at 3 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: app-backup
+            image: google/cloud-sdk:alpine
+            env:
+            - name: BACKUP_DATE
+              value: "$(date +%Y%m%d)"
+            command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Starting application data backup at $(date)"
+              # Backup application logs
+              kubectl logs -n production -l app=pinky-promise-backend --since=168h > /backup/backend-logs-$BACKUP_DATE.log
+              kubectl logs -n production -l app=pinky-promise-frontend --since=168h > /backup/frontend-logs-$BACKUP_DATE.log
+              
+              # Backup configuration files
+              kubectl get configmaps -n production -o yaml > /backup/configmaps-$BACKUP_DATE.yaml
+              kubectl get secrets -n production -o yaml > /backup/secrets-$BACKUP_DATE.yaml
+              
+              # Upload to GCS
+              gsutil cp /backup/*.log gs://pinky-promise-backups/application-logs/
+              gsutil cp /backup/*.yaml gs://pinky-promise-backups/configurations/
+              
+              echo "Application backup completed and uploaded"
+            volumeMounts:
+            - name: backup-storage
+              mountPath: /backup
+            resources:
+              requests:
+                memory: "128Mi"
+                cpu: "100m"
+              limits:
+                memory: "256Mi"
+                cpu: "200m"
+          volumes:
+          - name: backup-storage
+            emptyDir: {}
+          restartPolicy: OnFailure
+      backoffLimit: 2
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 2
+---
+# Disaster Recovery Secret for Cross-Region
+apiVersion: v1
+kind: Secret
+metadata:
+  name: disaster-recovery-config
+  namespace: production
+type: Opaque
+data:
+  # Base64 encoded values (replace with actual values)
+  backup-region: dXMtd2VzdDEtYQ==  # us-west1-a
+  recovery-cluster: cGlua3ktcHJvbWlzZS1kcg==  # pinky-promise-dr
+  gcs-bucket: cGlua3ktcHJvbWlzZS1iYWNrdXBz  # pinky-promise-backups
+---
+# Disaster Recovery Plan ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: disaster-recovery-plan
+  namespace: production
+data:
+  recovery-steps.md: |
+    # Disaster Recovery Plan for Pinky Promise App
+    
+    ## 1. Database Recovery
+    ```bash
+    # Download latest backup
+    gsutil cp gs://pinky-promise-backups/database/backup-latest.sql.gz /tmp/
+    
+    # Restore database
+    gunzip /tmp/backup-latest.sql.gz
+    psql -h $RECOVERY_DB_HOST -U $DB_USER -d pinky_promise_db < /tmp/backup-latest.sql
+    ```
+    
+    ## 2. Application Recovery
+    ```bash
+    # Switch to DR cluster
+    kubectl config use-context pinky-promise-dr
+    
+    # Deploy application
+    kubectl apply -f kubernetes/manifests/
+    
+    # Update DNS to point to DR cluster
+    # Update load balancer IPs in DNS provider
+    ```
+    
+    ## 3. Data Validation
+    ```bash
+    # Verify application functionality
+    curl -f https://pinky-promise.dev/health
+    
+    # Check database connectivity
+    kubectl exec -it deployment/pinky-promise-backend -- curl localhost:8080/api/health
+    ```
+    
+    ## 4. Recovery Time Objectives (RTO)
+    - Database Recovery: < 30 minutes
+    - Application Recovery: < 15 minutes
+    - DNS Propagation: < 5 minutes
+    - Total RTO: < 1 hour
+    
+    ## 5. Recovery Point Objectives (RPO)
+    - Database: < 24 hours (daily backups)
+    - Application configs: < 1 week (weekly backups)
+    - Logs: < 1 week (weekly backups)
+  
+  recovery-scripts.sh: |
+    #!/bin/bash
+    set -e
+    
+    # Emergency Recovery Script
+    echo "Starting emergency recovery procedure..."
+    
+    # 1. Check backup availability
+    LATEST_BACKUP=$(gsutil ls gs://pinky-promise-backups/database/ | tail -1)
+    echo "Latest backup found: $LATEST_BACKUP"
+    
+    # 2. Verify DR cluster access
+    kubectl config use-context pinky-promise-dr
+    kubectl get nodes
+    
+    # 3. Deploy core services
+    kubectl apply -f kubernetes/manifests/namespace.yaml
+    kubectl apply -f kubernetes/manifests/database.yaml
+    kubectl apply -f kubernetes/manifests/secrets.yaml
+    
+    # 4. Wait for database to be ready
+    kubectl wait --for=condition=ready pod -l app=postgresql -n production --timeout=300s
+    
+    # 5. Restore database
+    gsutil cp $LATEST_BACKUP /tmp/backup.sql.gz
+    gunzip /tmp/backup.sql.gz
+    kubectl exec -i deployment/postgresql -n production -- psql -U postgres -d pinky_promise_db < /tmp/backup.sql
+    
+    # 6. Deploy application
+    kubectl apply -f kubernetes/manifests/backend.yaml
+    kubectl apply -f kubernetes/manifests/frontend.yaml
+    kubectl apply -f kubernetes/manifests/ingress.yaml
+    
+    # 7. Verify deployment
+    kubectl wait --for=condition=available deployment -l app=pinky-promise-backend -n production --timeout=300s
+    kubectl wait --for=condition=available deployment -l app=pinky-promise-frontend -n production --timeout=300s
+    
+    echo "Emergency recovery completed successfully!"
+---
+# Health Check for DR
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dr-health-check
+  namespace: production
+spec:
+  schedule: "*/30 * * * *"  # Every 30 minutes
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: health-checker
+            image: curlimages/curl:latest
+            command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Performing DR health check at $(date)"
+              
+              # Check primary application
+              if curl -f -s http://pinky-promise-frontend-service.production.svc.cluster.local/health; then
+                echo "✅ Primary application is healthy"
+              else
+                echo "❌ Primary application is down - consider DR activation"
+                exit 1
+              fi
+              
+              # Check database connectivity
+              if kubectl exec deployment/postgresql -n production -- pg_isready; then
+                echo "✅ Database is accessible"
+              else
+                echo "❌ Database is not accessible"
+                exit 1
+              fi
+              
+              # Check backup freshness
+              LATEST_BACKUP_TIME=$(gsutil ls -l gs://pinky-promise-backups/database/ | tail -1 | awk '{print $2}')
+              echo "Latest backup: $LATEST_BACKUP_TIME"
+              
+              echo "DR health check completed successfully"
+            resources:
+              requests:
+                memory: "64Mi"
+                cpu: "50m"
+              limits:
+                memory: "128Mi"
+                cpu: "100m"
+          restartPolicy: OnFailure
+      backoffLimit: 1
+  successfulJobsHistoryLimit: 10
+  failedJobsHistoryLimit: 5
+---
+# Automated Failover Alert
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: failover-alerts
+  namespace: production
+data:
+  alert-rules.yaml: |
+    groups:
+    - name: disaster-recovery
+      rules:
+      - alert: ApplicationDown
+        expr: up{job="pinky-promise-frontend"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Pinky Promise application is down"
+          description: "The application has been down for more than 5 minutes. Consider DR activation."
+      
+      - alert: DatabaseDown
+        expr: up{job="postgresql"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Database is down"
+          description: "PostgreSQL database is not responding. Immediate action required."
+      
+      - alert: BackupStale
+        expr: (time() - last_backup_timestamp) > 86400
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Database backup is stale"
+          description: "Last backup is older than 24 hours. Check backup job status."
+---
+# Cross-Region Replication Setup
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: replication-config
+  namespace: production
+data:
+  setup-replication.sql: |
+    -- PostgreSQL Streaming Replication Setup
+    -- Run on primary database
+    
+    -- Create replication user
+    CREATE USER replicator REPLICATION LOGIN ENCRYPTED PASSWORD 'replica_password';
+    
+    -- Configure pg_hba.conf for replication
+    -- host replication replicator DR_REPLICA_IP/32 md5
+    
+    -- Configure postgresql.conf
+    -- wal_level = replica
+    -- max_wal_senders = 3
+    -- wal_keep_segments = 8
+    -- archive_mode = on
+    -- archive_command = 'gsutil cp %p gs://pinky-promise-backups/wal/%f'
+  
+  replica-setup.sql: |
+    -- Run on replica database
+    -- pg_basebackup -h PRIMARY_IP -D /var/lib/postgresql/data -U replicator -P -v -R
+    
+    -- Configure recovery.conf (for PostgreSQL < 12)
+    -- standby_mode = 'on'
+    -- primary_conninfo = 'host=PRIMARY_IP port=5432 user=replicator'
+    -- trigger_file = '/tmp/postgresql.trigger'
+---
+# Storage Class for Backups
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: backup-storage
+provisioner: kubernetes.io/gce-pd
+parameters:
+  type: pd-standard
+  replication-type: regional-pd
+  zones: us-central1-a,us-central1-b
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+---
+# Persistent Volume for Backup Staging
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backup-staging-pvc
+  namespace: production
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: backup-storage
+  resources:
+    requests:
+      storage: 50Gi
+
+# Cloud SQL Backup CronJob
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: database-backup
+  namespace: production
+spec:
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: production-workload-identity
+          containers:
+          - name: backup
+            image: google/cloud-sdk:alpine
+            command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "Starting database backup..."
+              TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+              BACKUP_NAME="pinky-promise-backup-${TIMESTAMP}"
+              
+              # Create Cloud SQL backup
+              gcloud sql backups create \
+                --instance=production-pinky-promise-db \
+                --description="Automated daily backup ${TIMESTAMP}" \
+                --project=pinky-promise-app
+              
+              # Export to Cloud Storage for long-term retention
+              gsutil -m cp gs://pinky-promise-app-backups/exports/pinky-promise-export-${TIMESTAMP}.sql \
+                gs://pinky-promise-app-backups-archive/$(date +%Y/%m/%d)/
+              
+              echo "Backup completed: ${BACKUP_NAME}"
+            env:
+            - name: CLOUDSDK_CORE_PROJECT
+              value: "pinky-promise-app"
+            resources:
+              requests:
+                memory: "128Mi"
+                cpu: "100m"
+              limits:
+                memory: "256Mi"
+                cpu: "200m"
+          restartPolicy: OnFailure
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+---
+# Database Export CronJob
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: database-export
+  namespace: production
+spec:
+  schedule: "0 3 * * 0"  # Weekly on Sunday at 3 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: production-workload-identity
+          containers:
+          - name: export
+            image: google/cloud-sdk:alpine
+            command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "Starting database export..."
+              TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+              EXPORT_URI="gs://pinky-promise-app-backups/exports/pinky-promise-export-${TIMESTAMP}.sql"
+              
+              # Export database to Cloud Storage
+              gcloud sql export sql production-pinky-promise-db ${EXPORT_URI} \
+                --database=pinky_promise \
+                --project=pinky-promise-app
+              
+              echo "Export completed: ${EXPORT_URI}"
+            env:
+            - name: CLOUDSDK_CORE_PROJECT
+              value: "pinky-promise-app"
+            resources:
+              requests:
+                memory: "128Mi"
+                cpu: "100m"
+              limits:
+                memory: "256Mi"
+                cpu: "200m"
+          restartPolicy: OnFailure
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+---
+# Backup Cleanup CronJob
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-cleanup
+  namespace: production
+spec:
+  schedule: "0 4 * * 1"  # Weekly on Monday at 4 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: production-workload-identity
+          containers:
+          - name: cleanup
+            image: google/cloud-sdk:alpine
+            command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "Starting backup cleanup..."
+              
+              # Delete backups older than 30 days
+              CUTOFF_DATE=$(date -d '30 days ago' +%Y-%m-%d)
+              
+              gcloud sql backups list \
+                --instance=production-pinky-promise-db \
+                --project=pinky-promise-app \
+                --format="value(id,startTime.date())" | \
+              while read backup_id backup_date; do
+                if [[ "$backup_date" < "$CUTOFF_DATE" ]]; then
+                  echo "Deleting old backup: $backup_id ($backup_date)"
+                  gcloud sql backups delete $backup_id \
+                    --instance=production-pinky-promise-db \
+                    --project=pinky-promise-app \
+                    --quiet
+                fi
+              done
+              
+              # Clean up old exports from Cloud Storage
+              gsutil -m rm -r gs://pinky-promise-app-backups/exports/pinky-promise-export-$(date -d '60 days ago' +%Y%m%d)*.sql || true
+              
+              echo "Cleanup completed"
+            env:
+            - name: CLOUDSDK_CORE_PROJECT
+              value: "pinky-promise-app"
+            resources:
+              requests:
+                memory: "128Mi"
+                cpu: "100m"
+              limits:
+                memory: "256Mi"
+                cpu: "200m"
+          restartPolicy: OnFailure
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+---
+# Disaster Recovery Job Template
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: disaster-recovery-template
+  namespace: production
+spec:
+  template:
+    spec:
+      serviceAccountName: production-workload-identity
+      containers:
+      - name: restore
+        image: google/cloud-sdk:alpine
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          echo "Starting disaster recovery process..."
+          
+          # This is a template - actual restore commands would be:
+          # 1. Create new Cloud SQL instance if needed
+          # 2. Restore from backup or import from Cloud Storage
+          # 3. Update application configuration
+          # 4. Verify data integrity
+          
+          echo "Disaster recovery template - manual execution required"
+          echo "Use: kubectl create job --from=job/disaster-recovery-template disaster-recovery-$(date +%s)"
+        env:
+        - name: CLOUDSDK_CORE_PROJECT
+          value: "pinky-promise-app"
+        - name: BACKUP_ID
+          value: "REPLACE_WITH_BACKUP_ID"
+        - name: RESTORE_INSTANCE
+          value: "production-pinky-promise-db-restore"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      restartPolicy: Never
+  backoffLimit: 1
+---
+# Application Health Monitor
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: health-monitor
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: health-monitor
+  template:
+    metadata:
+      labels:
+        app: health-monitor
+    spec:
+      containers:
+      - name: monitor
+        image: curlimages/curl:latest
+        command:
+        - /bin/sh
+        - -c
+        - |
+          while true; do
+            echo "$(date): Health check starting..."
+            
+            # Check frontend
+            if curl -f -s http://pinky-promise-frontend-service.production.svc.cluster.local > /dev/null; then
+              echo "$(date): Frontend OK"
+            else
+              echo "$(date): Frontend FAILED"
+            fi
+            
+            # Check backend
+            if curl -f -s http://pinky-promise-backend-service.production.svc.cluster.local > /dev/null; then
+              echo "$(date): Backend OK"
+            else
+              echo "$(date): Backend FAILED"
+            fi
+            
+            sleep 60
+          done
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "10m"
+          limits:
+            memory: "64Mi"
+            cpu: "50m"
+---
+# Circuit Breaker ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: circuit-breaker-config
+  namespace: production
+data:
+  config.json: |
+    {
+      "circuitBreaker": {
+        "enabled": true,
+        "threshold": 5,
+        "timeout": 30000,
+        "errorThresholdPercentage": 50,
+        "resetTimeout": 60000
+      },
+      "healthCheck": {
+        "enabled": true,
+        "interval": 30000,
+        "timeout": 5000,
+        "retries": 3
+      },
+      "gracefulShutdown": {
+        "enabled": true,
+        "timeout": 30000
+      }
+    }
+

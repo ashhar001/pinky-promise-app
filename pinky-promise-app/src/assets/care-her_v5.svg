@@ -1,0 +1,21 @@
+<svg width="175" height="80" viewBox="0 0 350 160" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    .logo-font {
+      font-family: 'Pacifico', cursive;
+      font-weight: bold;
+      fill: #ff5a5f;
+    }
+    .swirl {
+      font-size: 108px;
+      letter-spacing: 3px;
+    }
+    .her {
+      font-size: 80px;
+      letter-spacing: 2px;
+    }
+  </style>
+  <!-- Swirl effect for 'C' -->
+  <text x="10" y="90" class="logo-font swirl">C</text>
+  <text x="85" y="90" class="logo-font swirl">are</text>
+  <text x="55" y="145" class="logo-font her">Her</text>
+</svg>

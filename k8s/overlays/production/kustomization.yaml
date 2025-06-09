@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: production
+
+resources:
+- ../../base
+
+replicas:
+- name: pinky-promise-app
+  count: 3
+
+images:
+- name: gcr.io/PROJECT_ID/pinky-promise-app
+  newName: gcr.io/pinky-promise-app/pinky-promise-app
+  newTag: latest
+
+commonLabels:
+  environment: production
+

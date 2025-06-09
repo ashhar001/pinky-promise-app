@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: pinky-promise-frontend-lb
+  namespace: production
+  labels:
+    app: pinky-promise-frontend
+  annotations:
+    cloud.google.com/load-balancer-type: "External"
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: pinky-promise-frontend
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pinky-promise-backend-lb
+  namespace: production
+  labels:
+    app: pinky-promise-backend
+  annotations:
+    cloud.google.com/load-balancer-type: "External"
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 5001
+    protocol: TCP
+    name: http
+  selector:
+    app: pinky-promise-backend
+

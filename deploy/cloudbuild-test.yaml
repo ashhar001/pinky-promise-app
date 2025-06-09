@@ -1,0 +1,27 @@
+# Cloud Build test configuration
+steps:
+  # Install dependencies and run tests for backend
+  - name: 'gcr.io/cloud-builders/npm'
+    id: 'backend-install'
+    dir: 'backend'
+    args: ['ci']
+
+  - name: 'gcr.io/cloud-builders/npm'
+    id: 'backend-test'
+    dir: 'backend'
+    args: ['test']
+    waitFor: ['backend-install']
+
+  # Install dependencies and run tests for frontend
+  - name: 'gcr.io/cloud-builders/npm'
+    id: 'frontend-install'
+    dir: 'pinky-promise-app'
+    args: ['ci']
+
+  - name: 'gcr.io/cloud-builders/npm'
+    id: 'frontend-test'
+    dir: 'pinky-promise-app'
+    args: ['test', '--', '--watchAll=false']
+    waitFor: ['frontend-install']
+
+timeout: 1800s

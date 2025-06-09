@@ -1,0 +1,84 @@
+# Git
+.git
+.gitignore
+
+# Node.js
+node_modules
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Environment variables
+.env
+.env.*
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Development files
+*.md
+*.log
+.eslintrc
+.prettierrc
+/coverage
+/public/robots.txt
+deploy/
+test/
+__tests__/
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Editor directories
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build output (will be generated in container)
+/build
+
+# Git
+.git
+.gitignore
+
+# Node.js
+node_modules
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Environment variables
+.env
+.env.*
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Development files
+*.md
+*.log
+.eslintrc
+.prettierrc
+/coverage
+/public/robots.txt
+deploy/
+test/
+__tests__/
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Editor directories
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build output (will be generated in container)
+/build
+

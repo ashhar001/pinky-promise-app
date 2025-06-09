@@ -1,0 +1,72 @@
+/* src/components/NavigationBar.css */
+
+/* Authentication button styling */
+.auth-button {
+    font-weight: 500;
+    border-radius: 6px;
+    padding: 8px 16px;
+    transition: all 0.2s ease-in-out;
+    text-decoration: none !important;
+    border-width: 2px;
+    min-width: 100px;
+    text-align: center;
+}
+
+/* Login button specific styling */
+.auth-button.btn-primary {
+    background-color: #007bff;
+    border-color: #007bff;
+    color: white;
+}
+
+.auth-button.btn-primary:hover {
+    background-color: #0056b3;
+    border-color: #0056b3;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0,123,255,0.25);
+}
+
+/* Logout button specific styling */
+.auth-button.btn-outline-danger {
+    color: #dc3545;
+    border-color: #dc3545;
+    background-color: transparent;
+}
+
+.auth-button.btn-outline-danger:hover {
+    background-color: #dc3545;
+    border-color: #dc3545;
+    color: white;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(220,53,69,0.25);
+}
+
+/* Responsive adjustments */
+@media (max-width: 991.98px) {
+    .auth-button {
+        margin-top: 8px;
+        width: 100%;
+    }
+}
+
+/* Navbar alignment improvements */
+.navbar-nav .nav-link {
+    padding: 8px 12px;
+    margin: 0 4px;
+    border-radius: 4px;
+    transition: background-color 0.2s ease-in-out;
+}
+
+.navbar-nav .nav-link:hover {
+    background-color: rgba(0,0,0,0.05);
+}
+
+/* Chat link styling to match other nav items */
+.navbar-nav .nav-link.chat-link {
+    color: #007bff !important;
+    font-weight: 500;
+}
+
+.navbar-nav .nav-link.chat-link:hover {
+    background-color: rgba(0,123,255,0.1);
+}

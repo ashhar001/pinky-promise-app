@@ -1,0 +1,190 @@
+# Cloud Build configuration for CI/CD
+steps:
+  # Install dependencies and run tests for backend
+  - name: 'gcr.io/cloud-builders/npm'
+    id: 'backend-install'
+    dir: 'backend'
+    args: ['ci']
+
+  - name: 'gcr.io/cloud-builders/npm'
+    id: 'backend-test'
+    dir: 'backend'
+    args: ['test']
+    waitFor: ['backend-install']
+
+  # Install dependencies and run tests for frontend
+  - name: 'gcr.io/cloud-builders/npm'
+    id: 'frontend-install'
+    dir: 'pinky-promise-app'
+    args: ['ci']
+
+  - name: 'gcr.io/cloud-builders/npm'
+    id: 'frontend-test'
+    dir: 'pinky-promise-app'
+    args: ['test', '--', '--watchAll=false']
+    waitFor: ['frontend-install']
+
+  # Build and push backend Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'backend-build'
+    args: [
+      'build',
+      '-t', 'gcr.io/$PROJECT_ID/pinky-promise-backend:$COMMIT_SHA',
+      '-t', 'gcr.io/$PROJECT_ID/pinky-promise-backend:latest',
+      '-f', 'deploy/backend/Dockerfile',
+      './backend'
+    ]
+    waitFor: ['backend-test']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'backend-push'
+    args: ['push', 'gcr.io/$PROJECT_ID/pinky-promise-backend:$COMMIT_SHA']
+    waitFor: ['backend-build']
+
+  # Build and push frontend Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'frontend-build'
+    args: [
+      'build',
+      '-t', 'gcr.io/$PROJECT_ID/pinky-promise-frontend:$COMMIT_SHA',
+      '-t', 'gcr.io/$PROJECT_ID/pinky-promise-frontend:latest',
+      '-f', 'deploy/frontend/Dockerfile',
+      './pinky-promise-app'
+    ]
+    waitFor: ['frontend-test']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'frontend-push'
+    args: ['push', 'gcr.io/$PROJECT_ID/pinky-promise-frontend:$COMMIT_SHA']
+    waitFor: ['frontend-build']
+
+  # Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'backend-deploy'
+    entrypoint: gcloud
+    args: [
+      'run', 'deploy', 'pinky-promise-backend',
+      '--image', 'gcr.io/$PROJECT_ID/pinky-promise-backend:$COMMIT_SHA',
+      '--region', 'us-central1',
+      '--platform', 'managed',
+      '--allow-unauthenticated'
+    ]
+    waitFor: ['backend-push']
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'frontend-deploy'
+    entrypoint: gcloud
+    args: [
+      'run', 'deploy', 'pinky-promise-frontend',
+      '--image', 'gcr.io/$PROJECT_ID/pinky-promise-frontend:$COMMIT_SHA',
+      '--region', 'us-central1',
+      '--platform', 'managed',
+      '--allow-unauthenticated'
+    ]
+    waitFor: ['frontend-push']
+
+# Store images in Google Container Registry
+images:
+  - 'gcr.io/$PROJECT_ID/pinky-promise-backend:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/pinky-promise-backend:latest'
+  - 'gcr.io/$PROJECT_ID/pinky-promise-frontend:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/pinky-promise-frontend:latest'
+
+# Define timeout (1 hour)
+timeout: 3600s
+
+# Cloud Build configuration for CI/CD
+steps:
+  # Install dependencies and run tests for backend
+  - name: 'gcr.io/cloud-builders/npm'
+    id: 'backend-install'
+    dir: 'backend'
+    args: ['ci']
+
+  - name: 'gcr.io/cloud-builders/npm'
+    id: 'backend-test'
+    dir: 'backend'
+    args: ['test']
+    waitFor: ['backend-install']
+
+  # Install dependencies and run tests for frontend
+  - name: 'gcr.io/cloud-builders/npm'
+    id: 'frontend-install'
+    dir: 'pinky-promise-app'
+    args: ['ci']
+
+  - name: 'gcr.io/cloud-builders/npm'
+    id: 'frontend-test'
+    dir: 'pinky-promise-app'
+    args: ['test', '--', '--watchAll=false']
+    waitFor: ['frontend-install']
+
+  # Build and push backend Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'backend-build'
+    args: [
+      'build',
+      '-t', 'gcr.io/$PROJECT_ID/pinky-promise-backend:$COMMIT_SHA',
+      '-t', 'gcr.io/$PROJECT_ID/pinky-promise-backend:latest',
+      '-f', 'deploy/backend/Dockerfile',
+      './backend'
+    ]
+    waitFor: ['backend-test']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'backend-push'
+    args: ['push', 'gcr.io/$PROJECT_ID/pinky-promise-backend:$COMMIT_SHA']
+    waitFor: ['backend-build']
+
+  # Build and push frontend Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'frontend-build'
+    args: [
+      'build',
+      '-t', 'gcr.io/$PROJECT_ID/pinky-promise-frontend:$COMMIT_SHA',
+      '-t', 'gcr.io/$PROJECT_ID/pinky-promise-frontend:latest',
+      '-f', 'deploy/frontend/Dockerfile',
+      './pinky-promise-app'
+    ]
+    waitFor: ['frontend-test']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'frontend-push'
+    args: ['push', 'gcr.io/$PROJECT_ID/pinky-promise-frontend:$COMMIT_SHA']
+    waitFor: ['frontend-build']
+
+  # Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'backend-deploy'
+    entrypoint: gcloud
+    args: [
+      'run', 'deploy', 'pinky-promise-backend',
+      '--image', 'gcr.io/$PROJECT_ID/pinky-promise-backend:$COMMIT_SHA',
+      '--region', 'us-central1',
+      '--platform', 'managed',
+      '--allow-unauthenticated'
+    ]
+    waitFor: ['backend-push']
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'frontend-deploy'
+    entrypoint: gcloud
+    args: [
+      'run', 'deploy', 'pinky-promise-frontend',
+      '--image', 'gcr.io/$PROJECT_ID/pinky-promise-frontend:$COMMIT_SHA',
+      '--region', 'us-central1',
+      '--platform', 'managed',
+      '--allow-unauthenticated'
+    ]
+    waitFor: ['frontend-push']
+
+# Store images in Google Container Registry
+images:
+  - 'gcr.io/$PROJECT_ID/pinky-promise-backend:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/pinky-promise-backend:latest'
+  - 'gcr.io/$PROJECT_ID/pinky-promise-frontend:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/pinky-promise-frontend:latest'
+
+# Define timeout (1 hour)
+timeout: 3600s
+

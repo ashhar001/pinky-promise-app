@@ -1,0 +1,49 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: pinky-promise
+  namespace: argocd
+spec:
+  description: Pinky Promise Application Project
+  sourceRepos:
+  - 'https://github.com/YOUR_USERNAME/pinky-promise-app-source'  # Change this to your app source repo
+  destinations:
+  - namespace: pinky-promise
+    server: https://kubernetes.default.svc
+  - namespace: pinky-promise-staging
+    server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+  - group: ''
+    kind: Namespace
+  - group: storage.k8s.io
+    kind: StorageClass
+  - group: networking.k8s.io
+    kind: NetworkPolicy
+  namespaceResourceWhitelist:
+  - group: ''
+    kind: ConfigMap
+  - group: ''
+    kind: Secret
+  - group: ''
+    kind: Service
+  - group: ''
+    kind: ServiceAccount
+  - group: ''
+    kind: PersistentVolumeClaim
+  - group: apps
+    kind: Deployment
+  - group: apps
+    kind: StatefulSet
+  - group: networking.k8s.io
+    kind: Ingress
+  - group: autoscaling
+    kind: HorizontalPodAutoscaler
+  roles:
+  - name: admin
+    description: Admin privileges to pinky-promise project
+    policies:
+    - p, proj:pinky-promise:admin, applications, *, pinky-promise/*, allow
+    - p, proj:pinky-promise:admin, repositories, *, *, allow
+    groups:
+    - pinky-promise-admins
+

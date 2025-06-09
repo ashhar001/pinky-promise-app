@@ -1,0 +1,33 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: pinky-promise-app
+  namespace: argocd
+  labels:
+    app: pinky-promise
+spec:
+  project: pinky-promise
+  source:
+    repoURL: https://github.com/YOUR_USERNAME/pinky-promise-app-source  # Change this to your app source repo
+    targetRevision: main
+    path: kubernetes/manifests  # Path to Kubernetes manifests in source repo
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: pinky-promise
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  revisionHistoryLimit: 10
+

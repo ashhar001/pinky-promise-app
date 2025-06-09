@@ -1,0 +1,88 @@
+# Network Policy for Frontend
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-netpol
+  namespace: production
+spec:
+  podSelector:
+    matchLabels:
+      app: pinky-promise-frontend
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from: []  # Allow all ingress (including load balancer)
+    ports:
+    - protocol: TCP
+      port: 8080
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: pinky-promise-backend
+    ports:
+    - protocol: TCP
+      port: 5001
+  - to: []  # Allow all egress for internet access
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 80
+    - protocol: UDP
+      port: 53
+---
+# Network Policy for Backend
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-netpol
+  namespace: production
+spec:
+  podSelector:
+    matchLabels:
+      app: pinky-promise-backend
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from: []  # Allow all ingress (including load balancer)
+    ports:
+    - protocol: TCP
+      port: 5001
+  egress:
+  - to: []  # Database and external services
+    ports:
+    - protocol: TCP
+      port: 5432  # PostgreSQL
+    - protocol: TCP
+      port: 443   # HTTPS
+    - protocol: UDP
+      port: 53    # DNS
+---
+# Pod Security Policy (if supported)
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: pinky-promise-psp
+  namespace: production
+spec:
+  privileged: false
+  allowPrivilegeEscalation: false
+  requiredDropCapabilities:
+    - ALL
+  volumes:
+    - 'configMap'
+    - 'emptyDir'
+    - 'projected'
+    - 'secret'
+    - 'downwardAPI'
+    - 'persistentVolumeClaim'
+  runAsUser:
+    rule: 'MustRunAsNonRoot'
+  seLinux:
+    rule: 'RunAsAny'
+  fsGroup:
+    rule: 'RunAsAny'
+

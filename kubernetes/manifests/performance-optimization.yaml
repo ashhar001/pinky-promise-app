@@ -1,0 +1,304 @@
+# Redis Cache for Performance
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-cache
+  namespace: production
+  labels:
+    app: redis-cache
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis-cache
+  template:
+    metadata:
+      labels:
+        app: redis-cache
+    spec:
+      containers:
+      - name: redis
+        image: redis:alpine
+        ports:
+        - containerPort: 6379
+        args:
+        - redis-server
+        - --maxmemory
+        - 256mb
+        - --maxmemory-policy
+        - allkeys-lru
+        - --appendonly
+        - "yes"
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          tcpSocket:
+            port: 6379
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          tcpSocket:
+            port: 6379
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: redis-data
+        emptyDir: {}
+---
+# Redis Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-cache-service
+  namespace: production
+spec:
+  selector:
+    app: redis-cache
+  ports:
+  - port: 6379
+    targetPort: 6379
+  type: ClusterIP
+---
+# CDN Configuration (Cloud Storage bucket for static assets)
+apiVersion: storage.cnrm.cloud.google.com/v1beta1
+kind: StorageBucket
+metadata:
+  name: pinky-promise-cdn
+  namespace: production
+spec:
+  bucketPolicyOnly: true
+  cors:
+  - origin:
+    - "https://pinky-promise.dev"
+    - "https://www.pinky-promise.dev"
+    method:
+    - GET
+    - HEAD
+    maxAgeSeconds: 3600
+  lifecycle:
+    rule:
+    - action:
+        type: Delete
+      condition:
+        age: 90
+        matchesStorageClass:
+        - STANDARD
+    - action:
+        type: SetStorageClass
+        storageClass: COLDLINE
+      condition:
+        age: 30
+        matchesStorageClass:
+        - STANDARD
+  location: US
+  storageClass: STANDARD
+  uniformBucketLevelAccess: true
+  website:
+    mainPageSuffix: index.html
+    notFoundPage: 404.html
+---
+# Load Testing Job
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: load-test
+  namespace: production
+spec:
+  template:
+    spec:
+      containers:
+      - name: load-test
+        image: loadimpact/k6:latest
+        command:
+        - k6
+        - run
+        - --vus
+        - "10"
+        - --duration
+        - "30s"
+        - /scripts/load-test.js
+        volumeMounts:
+        - name: test-scripts
+          mountPath: /scripts
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      volumes:
+      - name: test-scripts
+        configMap:
+          name: load-test-scripts
+      restartPolicy: Never
+  backoffLimit: 1
+---
+# Load Test Scripts ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: load-test-scripts
+  namespace: production
+data:
+  load-test.js: |
+    import http from 'k6/http';
+    import { check, sleep } from 'k6';
+    
+    export let options = {
+      vus: 10,
+      duration: '30s',
+      thresholds: {
+        http_req_duration: ['p(95)<500'],
+        http_req_failed: ['rate<0.1'],
+      },
+    };
+    
+    export default function() {
+      // Test frontend
+      let frontendResponse = http.get('http://pinky-promise-frontend-service.production.svc.cluster.local');
+      check(frontendResponse, {
+        'frontend status is 200': (r) => r.status === 200,
+        'frontend response time < 500ms': (r) => r.timings.duration < 500,
+      });
+      
+      // Test backend health
+      let backendResponse = http.get('http://pinky-promise-backend-service.production.svc.cluster.local');
+      check(backendResponse, {
+        'backend status is 200': (r) => r.status === 200,
+        'backend response time < 200ms': (r) => r.timings.duration < 200,
+      });
+      
+      sleep(1);
+    }
+---
+# Cost Monitoring Alert
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cost-monitoring
+  namespace: production
+data:
+  budget-alert.json: |
+    {
+      "displayName": "Pinky Promise Budget Alert",
+      "budgetFilter": {
+        "projects": ["projects/pinky-promise-app"]
+      },
+      "amount": {
+        "specifiedAmount": {
+          "currencyCode": "USD",
+          "units": "100"
+        }
+      },
+      "thresholdRules": [
+        {
+          "thresholdPercent": 0.5,
+          "spendBasis": "CURRENT_SPEND"
+        },
+        {
+          "thresholdPercent": 0.8,
+          "spendBasis": "CURRENT_SPEND"
+        },
+        {
+          "thresholdPercent": 1.0,
+          "spendBasis": "CURRENT_SPEND"
+        }
+      ]
+    }
+---
+# Resource Quota for Cost Control
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: production-quota
+  namespace: production
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "8"
+    limits.memory: 16Gi
+    persistentvolumeclaims: "4"
+    services: "10"
+    secrets: "20"
+    configmaps: "20"
+---
+# Limit Range for Efficient Resource Usage
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: production-limits
+  namespace: production
+spec:
+  limits:
+  - default:
+      cpu: "500m"
+      memory: "512Mi"
+    defaultRequest:
+      cpu: "100m"
+      memory: "128Mi"
+    max:
+      cpu: "2"
+      memory: "4Gi"
+    min:
+      cpu: "50m"
+      memory: "64Mi"
+    type: Container
+  - max:
+      storage: "10Gi"
+    min:
+      storage: "1Gi"
+    type: PersistentVolumeClaim
+---
+# Priority Class for Critical Workloads
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: high-priority
+value: 1000
+globalDefault: false
+description: "High priority class for critical application components"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: low-priority
+value: 100
+globalDefault: false
+description: "Low priority class for batch jobs and monitoring"
+---
+# Database Connection Pool Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: database-config
+  namespace: production
+data:
+  database.conf: |
+    # PostgreSQL Connection Pool Settings
+    max_connections = 100
+    shared_buffers = 256MB
+    effective_cache_size = 1GB
+    maintenance_work_mem = 64MB
+    checkpoint_completion_target = 0.9
+    wal_buffers = 16MB
+    default_statistics_target = 100
+    random_page_cost = 1.1
+    effective_io_concurrency = 200
+    work_mem = 4MB
+    min_wal_size = 1GB
+    max_wal_size = 4GB
+    max_worker_processes = 8
+    max_parallel_workers_per_gather = 2
+    max_parallel_workers = 8
+    max_parallel_maintenance_workers = 2
+

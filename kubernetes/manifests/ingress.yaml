@@ -1,0 +1,40 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pinky-promise-ingress
+  namespace: production
+  annotations:
+    kubernetes.io/ingress.class: "gce"
+    kubernetes.io/ingress.global-static-ip-name: "pinky-promise-ip"
+    networking.gke.io/managed-certificates: "pinky-promise-ssl"
+    kubernetes.io/ingress.allow-http: "true"
+  labels:
+    app: pinky-promise
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /api/*
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: pinky-promise-backend-service
+            port:
+              number: 80
+      - path: /*
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: pinky-promise-frontend-service
+            port:
+              number: 80
+---
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: pinky-promise-ssl
+  namespace: production
+spec:
+  domains:
+    - pinky-promise.example.com  # Replace with your actual domain
+

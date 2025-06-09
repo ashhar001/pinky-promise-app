@@ -1,0 +1,99 @@
+# Global Static IP for Load Balancer
+apiVersion: v1
+kind: Service
+metadata:
+  name: pinky-promise-https-lb
+  namespace: production
+  labels:
+    app: pinky-promise
+  annotations:
+    cloud.google.com/load-balancer-type: "External"
+    networking.gke.io/load-balancer-type: "External"
+spec:
+  type: LoadBalancer
+  loadBalancerIP: "34.170.203.51"  # Use existing frontend IP
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  - port: 443
+    targetPort: 8080
+    protocol: TCP
+    name: https
+  selector:
+    app: pinky-promise-frontend
+---
+# Self-signed certificate for now (replace with real domain later)
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: pinky-promise-ssl-cert
+  namespace: production
+spec:
+  domains:
+    - "pinky-promise.dev"  # placeholder domain
+---
+# HTTPS Ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pinky-promise-https-ingress
+  namespace: production
+  annotations:
+    kubernetes.io/ingress.global-static-ip-name: "pinky-promise-static-ip"
+    networking.gke.io/managed-certificates: "pinky-promise-ssl-cert"
+    kubernetes.io/ingress.allow-http: "true"
+    kubernetes.io/ingress.class: "gce"
+  labels:
+    app: pinky-promise
+spec:
+  rules:
+  - host: "pinky-promise.dev"
+    http:
+      paths:
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: pinky-promise-backend-service
+            port:
+              number: 80
+      - path: /api/*
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: pinky-promise-backend-service
+            port:
+              number: 80
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: pinky-promise-frontend-service
+            port:
+              number: 80
+  - http:  # Fallback for IP access
+      paths:
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: pinky-promise-backend-service
+            port:
+              number: 80
+      - path: /api/*
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: pinky-promise-backend-service
+            port:
+              number: 80
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: pinky-promise-frontend-service
+            port:
+              number: 80
+
