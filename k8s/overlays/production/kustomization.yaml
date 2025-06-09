@@ -15,6 +15,7 @@ images:
   newName: gcr.io/pinky-promise-app/pinky-promise-app
   newTag: latest
 
-commonLabels:
-  environment: production
+labels:
+- pairs:
+    environment: production
 

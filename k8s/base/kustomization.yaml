@@ -6,9 +6,9 @@ resources:
 - service.yaml
 - service-accounts.yaml
 - ingress.yaml
-- secrets.yaml
 
-commonLabels:
-  app: pinky-promise
-  version: v1
+labels:
+- pairs:
+    app: pinky-promise
+    version: v1
 
