@@ -129,8 +129,16 @@ jobs:
       run: |
         # Extract the latest tag from the build output
         FULL_TAG="${{ needs.build.outputs.image-tag }}"
-        # Get just the tag part (after the last colon)
-        IMAGE_TAG=$(echo "$FULL_TAG" | cut -d' ' -f1 | cut -d':' -f2)
+        echo "Full tag output: $FULL_TAG"
+        
+        # Get the latest tag (prioritize 'latest' if available, otherwise use commit-based tag)
+        if echo "$FULL_TAG" | grep -q ":latest"; then
+          IMAGE_TAG="latest"
+        else
+          # Get the first line and extract tag part
+          IMAGE_TAG=$(echo "$FULL_TAG" | head -n1 | cut -d':' -f2)
+        fi
+        
         echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_OUTPUT
         echo "Extracted tag: $IMAGE_TAG"
     
